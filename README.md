@@ -21,6 +21,40 @@ The idea: City people want to grow their own vegetables but don't have land or e
 
 ---
 
+## System Architecture Overview
+
+```mermaid
+graph TB
+    subgraph Client["🖥️ Frontend (React 19 + Vite)"]
+        MP["Marketplace Page"]
+        PD["Plot Detail & Booking"]
+        CD["Customer Dashboard"]
+        FD["Farm Diary Viewer"]
+    end
+
+    subgraph Server["⚙️ Backend (Spring Boot 3)"]
+        AUTH["Identity Service"]
+        RENTAL["Rental & Contract Service"]
+        FARM["Farm & Plot Service"]
+        IOT["IoT Data Service"]
+        PAY["Payment Service"]
+    end
+
+    subgraph DB["🗄️ PostgreSQL 16 (3NF)"]
+        TABLES[("12 Tables\nFarm, Plot, Contract,\nContractPlot, User,\nPayment, FarmDiary...")]
+    end
+
+    Client -->|REST API| Server
+    Server -->|JPA / SQL| DB
+    IOT -.->|Sensor Data| FARM
+
+    style Client fill:#e8f4fd,stroke:#2196F3
+    style Server fill:#e8f5e9,stroke:#4CAF50
+    style DB fill:#fff3e0,stroke:#FF9800
+```
+
+---
+
 ## My BA Contributions
 
 ### 1. Business Rules Document (SSoT)
@@ -35,14 +69,90 @@ I wrote and maintained a single document containing **27 business rules** (BR01�
 
 I created a spreadsheet that maps each business goal → functional requirements → use cases → database tables → test cases. This helped us catch **5 missing edge cases** early (e.g., what happens if a customer tries to cancel a contract mid-harvest?) before any code was written.
 
+```mermaid
+graph LR
+    BG["🎯 Business Goals"] --> FR["📋 Functional\nRequirements (30+)"]
+    FR --> UC["📝 Use Cases"]
+    UC --> ERD["🗄️ Database Tables"]
+    ERD --> TC["✅ Test Cases (40+)"]
+
+    style BG fill:#e3f2fd,stroke:#1976D2
+    style FR fill:#e8f5e9,stroke:#388E3C
+    style UC fill:#fff3e0,stroke:#F57C00
+    style ERD fill:#fce4ec,stroke:#C62828
+    style TC fill:#f3e5f5,stroke:#7B1FA2
+```
+
 ### 3. Database Design (ERD)
 
 Designed the schema in Draw.io with **12 tables** normalized to **3NF**:
 
-```
-Farm, Plot, CropVariety, Contract, ContractPlot,
-ServiceMaster, FarmDiary, IoTStation, User, Payment,
-Consultation, Notification
+```mermaid
+erDiagram
+    Farm ||--o{ Plot : contains
+    Plot ||--o{ ContractPlot : "rented via"
+    Contract ||--o{ ContractPlot : covers
+    Contract }o--|| User : "signed by"
+    Contract ||--o{ Payment : "paid through"
+    Plot ||--o{ FarmDiary : "logged in"
+    Plot ||--o| IoTStation : "monitored by"
+    Farm ||--o{ CropVariety : offers
+    User ||--o{ Consultation : requests
+    User ||--o{ Notification : receives
+
+    Farm {
+        int farm_id PK
+        string name
+        string address
+        float total_area
+    }
+
+    Plot {
+        int plot_id PK
+        int farm_id FK
+        float area_sqm
+        string status
+        string gps_coords
+    }
+
+    Contract {
+        int contract_id PK
+        int user_id FK
+        date start_date
+        date end_date
+        string farming_model
+        decimal total_price
+    }
+
+    ContractPlot {
+        int contract_id FK
+        int plot_id FK
+        int crop_variety_id FK
+    }
+
+    Payment {
+        int payment_id PK
+        int contract_id FK
+        decimal amount
+        string status
+        timestamp paid_at
+    }
+
+    FarmDiary {
+        int diary_id PK
+        int plot_id FK
+        date log_date
+        string task_description
+        string photo_url
+    }
+
+    IoTStation {
+        int station_id PK
+        int plot_id FK
+        float soil_moisture
+        float temperature
+        timestamp reading_at
+    }
 ```
 
 Key decision: `ContractPlot` is a junction table that links one contract to multiple plots — this is how the Master Lease Agreement (BR01) works at the database level.
@@ -54,22 +164,31 @@ Key decision: `ContractPlot` is a junction table that links one contract to mult
 
 ---
 
-## Process Flow
+## User Booking Flow (BPMN-style)
 
+```mermaid
+flowchart TD
+    A([Customer visits Marketplace]) --> B{Found a\nplot they like?}
+    B -- No --> A
+    B -- Yes --> C[Select Crop & Farming Model\n- Self-growing\n- Assisted-growing]
+    C --> D[Optional: Book Agronomist\nConsultation]
+    D --> E[Confirm & Pay\nMaster Lease Agreement]
+    E --> F{Payment\nwithin 10 min?}
+    F -- No --> G[🔴 Auto-release plot\nBR08 Timeout Rollback]
+    G --> A
+    F -- Yes --> H[✅ Contract Activated\nPlot Assigned to Customer]
+    H --> I[Field Staff executes\ndaily farming tasks]
+    I --> J[Farm Diary updated\nwith photos & notes]
+    J --> K[Customer views progress\non Dashboard]
+    K --> L{Harvest\nready?}
+    L -- No --> I
+    L -- Yes --> M([🎉 Harvest Delivered\nto Customer])
+
+    style A fill:#e3f2fd,stroke:#1976D2
+    style H fill:#e8f5e9,stroke:#388E3C
+    style G fill:#ffebee,stroke:#C62828
+    style M fill:#e8f5e9,stroke:#388E3C
 ```
-[Customer]
-    │
-    ├──► Browse Marketplace & Filter Available Plots
-    ├──► Select Crop & Farming Model (Self / Assisted)
-    ├──► [Optional] Pre-Rental Agronomist Consultation
-    └──► Pay & Activate Lease (BR01, BR08)
-             │
-[Field Staff & IoT] ──► Daily Tasks ──► Farm Diary Log ──► Customer Dashboard
-```
-
-**Main Flow:** Booking → Payment → Plot Handover → Cultivation Cycle → Harvest Delivery
-
-**Exception Flows:** Payment Timeout Rollback (BR08), Weather Emergency Re-scheduling (BR15), Early Termination & Deposit Settlement
 
 ---
 
