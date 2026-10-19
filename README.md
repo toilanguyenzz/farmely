@@ -85,7 +85,7 @@ As the **System Analyst & Requirements Lead**, the system was architected around
 
 ```bash
 # Clone the repository
-git clone https://github.com/thaiquyen93/farmely.git
+git clone https://github.com/toilanguyenzz/farmely.git
 
 # Navigate to project directory
 cd farmely
